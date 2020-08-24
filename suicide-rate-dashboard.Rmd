@@ -1,0 +1,829 @@
+---
+title: "Suicide Rate Dashboard"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    social: menu
+    source_code: https://github.com/nslm/Suicide-Rate-Dashboard
+    theme: cerulean
+runtime: shiny
+---
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = FALSE)
+
+file = "https://raw.githubusercontent.com/nslm/Suicide-Rate-Dashboard/master/master4.csv"
+file2 = "https://raw.githubusercontent.com/nslm/Suicide-Rate-Dashboard/master/suicide-death-rates.csv"
+
+df = read.csv(file, sep=",")
+df2 = read.csv(file2, sep=",")
+
+
+df$Age = factor(df$Age, levels = c("5-14 years","15-24 years","25-34 years","35-54 years","55-74 years","75+ years"))
+
+df$Generation = factor(df$Generation, levels = c("G.I. Generation","Silent","Boomers","Generation X","Millenials","Generation Z"))
+
+names_map = function(zz){
+      if(zz == "USA"){
+        zz = "United States"
+      }
+      
+      if(zz == "UK:Great Britain"){
+        zz = "United Kingdom"
+      }
+      
+      if(zz == "Russia"){
+        zz = "Russian Federation"
+      }
+      
+      if(zz == "Japan:Honshu"){
+        zz = "Japan"
+      }
+  return(zz)
+}
+
+bootstrapPage()
+
+library(dplyr)
+library(ggplot2)
+library(plotly)
+library(maps)
+library(leaflet)
+library(rnaturalearth)
+library(flexdashboard)
+library(shiny)
+library(RColorBrewer)
+
+```
+
+
+Home
+=======================================================================
+
+Row {.tabset}
+-----------------------------------------------------------------------
+
+### Introduction
+
+```{r}
+
+span(textOutput("text1"), style="color: black;
+                                 font-size: 24px;
+                                 font-style: italic")
+output$text1 = renderText({
+  "The World Health Organization mentioned in 2019 that a person commits suicide every 40 seconds.   Although it is an old and growing issue, few nations have public policies for preventing suicide, and less than half of the WHO Member States provide reliable data on the topic.
+  
+   It was already public knowledge, even thanks to reputable newspaper publications, that in similar situations the suicide rate in a certain location could increase considerably, especially among some specific groups. Given the greater proportion of the Corona-Virus pandemic in relation to previous epidemics, it is necessary to consider that the impacts caused may be even more devastating than that of its predecessors."
+})
+
+```
+
+
+### Motivation
+
+```{r}
+span(textOutput("text2"), style="color: black;
+                                 font-size: 24px;
+                                 font-style: italic")
+
+output$text2 = renderText({
+  "The group's motivation to do this work has several factors. The idea started in the middle of the COVID-19 pandemic period, a time when billions of people were forced to remain in prison in their homes, many of them, including, having their income affected due to the inevitable economic crisis that emerged.
+  
+In view of the dangers posed by the COVID-19 pandemic, not only for people with illnesses such as anxiety and depression but also for those experiencing any type of setback, the group selected some datasets that worked in detail on the numbers of suicides in dozens of countries around the world, aiming to obtain information that could clarify the team on this topic. "
+})
+
+```
+
+
+### Datasets
+
+```{r}
+span(textOutput("text3"), style="color: black;
+                                 font-size: 24px;
+                                 font-style: italic")
+
+output$text3 = renderText({
+  "Two datasets were used. The first and most utilized one shows suicide rates from 1985 to 2016 and its data were mostly provided by institutions such as the UN, WHO and the World Bank with a view to greater suicide prevention. It is important to mention that this dataset was created through the union of four others, whose sources will be informed in the bibliographical section. "
+})
+
+```
+
+
+Row {.tabset}
+-----------------------------------------------------------------------
+
+### Secondary Dataset
+
+```{r}
+
+renderTable({
+  df2[1:10,]
+})
+
+```
+
+
+### Main Dataset
+
+```{r}
+
+renderTable({
+  head(df)
+})
+
+```
+
+
+Secondary Dataset
+=======================================================================
+
+Input {.sidebar data-width=120}
+-----------------------------------------------------------------------
+
+```{r}
+
+selectInput(
+  "year",
+  label = "Year",
+  choices = unique(df2$Year),
+  selected = 2016,
+  width = 200
+)
+
+selectInput(
+  "country",
+  label = "Country",
+  choices = unique(df2$Country),
+  selected = "United States",
+  width = 200
+)
+
+```
+
+Output {data-height=700}
+-----------------------------------------------------------------------
+
+### Suicide Rate of Selected Year Map (click on the map to select country)
+
+```{r}
+
+output$map = renderLeaflet({
+    
+    map = ne_countries()
+    names(map)[names(map) == "iso_a3"] <- "ISO3"
+    names(map)[names(map) == "name"] <- "NAME"
+    df_map = df2 %>% filter(Year == input$year)
+    
+    map$Suicides.100k = df_map[match(map$ISO3, df_map$Code), "Suicides.100k"]
+    
+    pal = colorBin(
+      palette = "YlOrRd", domain = map$Suicides.100k,
+      bins = seq(0, max(map$Suicides.100k, na.rm = TRUE) +10, by = 10)
+    )
+    
+    map$labels = paste0(
+      "<strong> Country: </strong> ",
+      map$NAME, "<br/> ",
+      "<strong> Suicides.100k: </strong> ",
+      map$Suicides.100k, "<br/> "
+    ) %>%
+      lapply(htmltools::HTML)
+    
+    
+    leaflet(map) %>%
+      addTiles() %>%
+      addProviderTiles(providers$CartoDB.DarkMatter) %>%
+      setView(lng = 0, lat = 30, zoom = 2) %>%
+      addPolygons(
+        fillColor = ~ pal(Suicides.100k),
+        color = "white",
+        fillOpacity = 0.7,
+        label = ~labels,
+        highlight = highlightOptions(
+          color = "black",
+          bringToFront = TRUE)) %>%
+      leaflet::addLegend(
+        pal = pal, values = ~Suicides.100k,
+        opacity = 0.6, title = "Suicides 100k")
+        
+  
+})
+  
+leafletOutput('map')
+
+```
+
+
+### Suicide Rate (selected country x world mean)
+
+```{r}
+
+coord_map = function(){
+      zz = input$country
+      xx = input$map_shape_click[3]
+      yy = input$map_shape_click[4]
+      if(length(xx)>0){
+          zz = map.where(database="world", yy, xx)
+      }
+      
+      zz = names_map(zz)
+      return(zz)
+}
+
+```
+
+```{r}
+
+renderPlotly({
+      z11 = coord_map()
+      
+      
+      df_g = df2 %>% 
+        filter(Year != 2017) %>% 
+        select(Country,Year,Suicides.100k)
+      
+      df_g1 = df_g %>% 
+        group_by(Year) %>%
+        summarise(Suicides.100k=mean(Suicides.100k))
+      
+      df_g2 = df_g %>%
+      filter(Country == z11) %>%
+      select(Year,Suicides.100k)
+      
+      df_g1$group = "World"
+      df_g2$group = z11 
+      df_g = rbind(df_g1,df_g2)
+      
+      
+      
+      
+      if(z11 %in% unique(df2$Country)){
+        ggplot(df_g, 
+        aes(x = Year, y = Suicides.100k, col = group)) +
+        geom_line() + theme_minimal() +
+        labs(x = "Year", y = "Suicides 100k") +
+        theme(legend.position = "bottom") +
+        labs(title = "") +
+        geom_point(aes(group = seq_along(Year))) +
+        theme(axis.title = element_text(size = 10),
+              axis.text = element_text(size = 8))  
+       
+      }
+}) 
+
+```
+
+
+Row {data-height=400}
+-----------------------------------------------------------------------
+
+### Table of Selected Country
+
+```{r}
+renderTable({ 
+      z22 = coord_map()
+
+      df2 %>%
+        filter(Country == z22) %>%
+        select(Country,Year,Suicides.100k)
+
+      
+})
+```
+
+
+### Top 5 Highest
+
+```{r}
+
+renderPlot({
+  
+      df5 = df2 %>%
+        filter(Year == input$year & Country != "Eastern Europe") %>%
+        mutate(rank = min_rank(-Suicides.100k) * 1) %>%
+        filter(rank <= 5) %>%
+        ungroup()
+      
+      df5$Suicides.100k = round(df5$Suicides.100k,2)
+      
+      ggplot(df5, aes(rank, group = Country, fill = Continent )) +
+      theme_minimal() +
+      geom_tile(aes(y = Suicides.100k/2,
+                    height = Suicides.100k,
+                    width = 0.9), alpha = 0.8, color = NA) +
+      coord_flip(clip = "off", expand = FALSE) +
+      scale_x_reverse() +
+      labs(title=NULL, x = NULL, y = NULL) +
+      geom_text(aes(rank,y=0,label = Country,hjust=0)) +      
+      geom_text(aes(rank,y=Suicides.100k,
+                    label = Suicides.100k, hjust=0)) +
+      theme(legend.position = "bottom",plot.margin = margin(0,1,0,0, "cm")) 
+      
+})
+
+```
+
+
+### Top 5 Lowest {.tabset}
+
+```{r}
+
+renderPlot({
+  
+      df5 = df2 %>%
+        filter(Year == input$year) %>%
+        mutate(rank = min_rank(Suicides.100k) * 1) %>%
+        filter(rank <= 5) %>%
+        ungroup()
+      
+      df5$Suicides.100k = round(df5$Suicides.100k,2)
+      
+      ggplot(df5, aes(rank, group = Country, fill = Continent )) +
+      theme_minimal() +
+      geom_tile(aes(y = Suicides.100k/2,
+                    height = Suicides.100k,
+                    width = 0.9), alpha = 0.8, color = NA) +
+      coord_flip(clip = "off", expand = FALSE) +
+      scale_x_reverse() +
+      labs(title=NULL, x = NULL, y = NULL) +
+      geom_text(aes(rank,y=0,label = Country,hjust=0)) +      
+      geom_text(aes(rank,y=Suicides.100k,
+                    label = Suicides.100k, hjust=0)) +
+      theme(legend.position = "bottom",plot.margin = margin(0,1,0,0, "cm"))
+})
+
+```
+
+
+Main Dataset
+=======================================================================
+
+Input {.sidebar data-width=120}
+-----------------------------------------------------------------------
+
+```{r}
+
+selectInput(
+  "year2",
+  label = "Year",
+  choices = seq(1987,2015,by=1),
+  selected = 2010,
+  width = 200
+)
+
+selectInput(
+  "country2",
+  label = "Country",
+  choices = unique(df$Country),
+  selected = "United States",
+  width = 200
+)
+
+```
+
+Output {data-height=400}
+-----------------------------------------------------------------------
+
+### Suicide Rate by Sex of Selected Country
+
+```{r}
+
+coord_map2 = function(){
+      zz = input$country2
+      xx = input$map2_shape_click[3]
+      yy = input$map2_shape_click[4]
+      if(length(xx)>0){
+          zz = map.where(database="world", yy, xx)
+      }
+      
+      zz = names_map(zz)
+      return(zz)
+}
+
+```
+
+```{r}
+
+renderPlotly({
+      z1 = coord_map2()
+      
+      df3_g = df %>% 
+      filter(Year != 2016 & Country==z1) %>% 
+      group_by(Year,Sex) %>%
+      summarise(Suicides.100k = mean(Suicides.100k))
+      
+       
+      if(z1 %in% unique(df$Country)){
+        ggplot(df3_g, 
+        aes(x = Year, y = Suicides.100k, color=Sex)) +
+        geom_line() + theme_minimal() +
+        labs(x = "Year", y = "Suicide Rate") +
+        theme(legend.position = "bottom") +
+        labs(title = z1) +
+        geom_point(aes(group = seq_along(Year))) 
+        
+      }
+})
+
+```
+
+
+### Suicide Rate by Age of Selected Country and Year
+
+```{r}
+
+renderPlotly({
+      z2 = coord_map2()
+      
+      if(z2 %in% unique(df$Country)){
+          df_z = df %>% filter(Country == z2 & Year == input$year2)
+          ggplot(df_z, aes(x = Age, y = Suicides.100k, fill = Sex )) +
+          theme_minimal() +
+          geom_col(position = "dodge") + 
+          labs(title = z2 ,
+               x = "", y = "Suicide Rate by 100k")+
+          coord_flip() 
+      }
+})
+
+```
+
+
+### Suicide Rate by Generation of Selected Country and Year
+
+```{r}
+
+renderPlotly({
+      z4 = coord_map2()
+      
+      if(z4 %in% unique(df$Country)){
+          df_z2 = df %>% filter(Country == z4 & Year == input$year2)
+          ggplot(df_z2, aes(x = Generation, y = Suicides.100k, fill = Sex )) +
+          theme_minimal() +
+          geom_col(position = "dodge") + 
+          labs(title = z4 ,
+               x = "", y = "Suicide Rate by 100k")+
+          coord_flip() 
+      }
+})
+
+```
+
+
+Row {data-height=600}
+-----------------------------------------------------------------------
+
+### Suicide Rate by Age of Selected Country 
+
+```{r}
+
+renderPlotly({
+      z3 = coord_map2()
+      
+      df2_g = df %>% 
+        filter(Year != 2016 & Country == z3) %>% 
+        group_by(Year,Age) %>%
+        summarise(Suicides.100k = mean(Suicides.100k))
+      
+       
+      if(z3 %in% unique(df$Country)){
+        ggplot(df2_g, 
+        aes(x = Year, y = Suicides.100k, color=Age)) +
+        geom_line() + theme_minimal() +
+        labs(x = "Year", y = "Suicide Rate") +
+        theme(axis.title = element_text(size = 10),
+              axis.text = element_text(size = 8,)) +
+        labs(title = z3) +
+        geom_point(aes(group = seq_along(Year)))
+        
+      }
+})
+
+```
+
+
+### Suicide no of Selected Year Map (click on the map to select country)
+
+```{r}
+
+output$map2 = renderLeaflet({
+
+    map2 = ne_countries()
+    names(map2)[names(map2) == "iso_a3"] <- "ISO3"
+    names(map2)[names(map2) == "name"] <- "NAME"
+    df_map2 = df %>% filter(Year == input$year2)
+    
+    map2$Suicides = df_map2[match(map2$ISO3, df_map2$Code), "Suicides"]
+    
+    pal2 = colorBin(
+      palette = c("#F4A582","#D6604D","#B2182B"), domain = map2$Suicides,
+      bins = seq(0, max(map2$Suicides, na.rm = TRUE) +1000, by = 1000)
+    )
+    
+    map2$labels = paste0(
+      "<strong> Country: </strong> ",
+      map2$NAME, "<br/> ",
+      "<strong> Suicides: </strong> ",
+      map2$Suicides, "<br/> "
+    ) %>%
+      lapply(htmltools::HTML)
+      
+
+    leaflet(map2) %>%
+      addTiles() %>%
+      addProviderTiles(providers$CartoDB.DarkMatter) %>%
+      setView(lng = 0, lat = 30, zoom = 2) %>%
+      addPolygons(
+        fillColor = ~ pal2(Suicides),
+        color = "white",
+        fillOpacity = 0.7,
+        label = ~labels,
+        highlight = highlightOptions(
+          color = "black",
+          bringToFront = TRUE)) %>%
+        leaflet::addLegend(
+        pal = pal2, values = ~Suicides,
+        opacity = 0.6, title = "Suicide no")
+
+})
+  
+leafletOutput('map2')
+
+```
+
+
+Dispersion
+=======================================================================
+
+Input {.sidebar data-width=200}
+-----------------------------------------------------------------------
+
+```{r}
+
+continents = append(unique(df$continent),"All",0)
+selectInput("continent", label = "continent:",
+            choices = continents, selected = "All")
+
+selectInput("generation2", label = "Generation:",
+            choices = c("All","G.I. Generation","Silent","Boomers",
+            "Generation X","Millenials","Generation Z")
+            , selected = "All")
+
+selectInput("age", label = "Age:",
+            choices = c("All","5-14 years","15-24 years","25-34 years",
+            "35-54 years","55-74 years","75+ years")
+            , selected = "All")
+
+
+selectInput("sex", label = "Sex:",
+            choices = unique(df$Sex), selected = "male")
+
+selectInput("variable", label = "Compared to:",
+            choices = colnames(df)[c(9,11,14,15,16)], selected = "HDI")
+
+```
+
+
+Output
+-----------------------------------------------------------------------
+
+### Correlation {.value-box}
+
+```{r}
+
+renderValueBox({
+  df4 = df
+  if(input$continent != "All"){
+    df4 = df4 %>% filter(continent == input$continent)
+  } 
+  if(input$generation2 != "All"){
+    df4 = df4 %>% filter(Generation == input$generation2)
+  }
+  if(input$age != "All"){
+    df4 = df4 %>% filter(Age == input$age)
+  }
+  if(input$sex != "All"){
+    df4 = df4 %>% filter(Sex == input$sex)
+  }
+  
+  
+  if(input$variable=="HDI"){
+    df4 = df4 %>%  
+        filter(!is.na(HDI))  
+    correlacao = cor(y = df4$Suicides.100k, x = df4$HDI)
+  }
+  
+  if(input$variable=="GDP.per.capita"){
+    df4 = df4 %>%  
+        filter(!is.na(GDP.per.capita))
+    correlacao = cor(y = df4$Suicides.100k, x = df4$GDP.per.capita)
+  }
+  
+  if(input$variable=="Life.Expectancy"){
+    df4 = df4 %>%  
+        filter(!is.na(Life.Expectancy)) 
+    correlacao = cor(y = df4$Suicides.100k, x = df4$Life.Expectancy)
+  }
+  
+  if(input$variable=="Schooling.Expectancy"){
+    df4 = df4 %>%  
+        filter(!is.na(Schooling.Expectancy))  
+    correlacao = cor(y = df4$Suicides.100k, x = df4$Schooling.Expectancy)
+  }
+  
+  if(input$variable=="Mean.Schooling"){
+    df4 = df4 %>%  
+        filter(!is.na(Mean.Schooling))  
+    correlacao = cor(y = df4$Suicides.100k, x = df4$Mean.Schooling)
+  }
+  valueBox(
+      value = correlacao,
+      color = "gainsboro")
+})
+
+```
+
+
+### Correlation with a transformation (ln(x)~y) {.value-box}
+
+```{r}
+
+renderValueBox({
+  df4 = df
+  if(input$continent != "All"){
+    df4 = df4 %>% filter(continent == input$continent)
+  }
+  
+  if(input$generation2 != "All"){
+    df4 = df4 %>% filter(Generation == input$generation2)
+  }
+  if(input$age != "All"){
+    df4 = df4 %>% filter(Age == input$age)
+  }
+  if(input$sex != "All"){
+    df4 = df4 %>% filter(Sex == input$sex)
+  } 
+  
+  
+  
+  if(input$variable=="HDI"){
+    df4 = df4 %>%  
+        filter(!is.na(HDI))  
+    correlacao = cor(y = df4$Suicides.100k, x = log(df4$HDI))
+  }
+  
+  if(input$variable=="GDP.per.capita"){
+    df4 = df4 %>%  
+        filter(!is.na(GDP.per.capita))
+    correlacao = cor(y = df4$Suicides.100k, x = log(df4$GDP.per.capita))
+  }
+  
+  if(input$variable=="Life.Expectancy"){
+    df4 = df4 %>%  
+        filter(!is.na(Life.Expectancy)) 
+    correlacao = cor(y = df4$Suicides.100k, x = log(df4$Life.Expectancy))
+  }
+  
+  if(input$variable=="Schooling.Expectancy"){
+    df4 = df4 %>%  
+        filter(!is.na(Schooling.Expectancy))  
+    correlacao = cor(y = df4$Suicides.100k, x = log(df4$Schooling.Expectancy))
+  }
+  
+  if(input$variable=="Mean.Schooling"){
+    df4 = df4 %>%  
+        filter(!is.na(Mean.Schooling))  
+    correlacao = cor(y = df4$Suicides.100k, x = log(df4$Mean.Schooling))
+  }
+  valueBox(
+      value = correlacao,
+      color = "gainsboro")
+})
+   
+```
+
+
+Row
+-----------------------------------------------------------------------
+### Dispersion Graph     (color = countries)
+
+```{r}
+
+renderPlotly({
+  
+    df4 = df
+    if(input$continent != "All"){
+      df4 = df4 %>% filter(continent == input$continent)
+    }
+    
+    if(input$generation2 != "All"){
+      df4 = df4 %>% filter(Generation == input$generation2)
+    }
+    if(input$age != "All"){
+      df4 = df4 %>% filter(Age == input$age)
+    }
+    if(input$sex != "All"){
+      df4 = df4 %>% filter(Sex == input$sex)
+    }
+    
+     
+    if(input$variable=="HDI"){
+      g = ggplot(df4, aes(x = HDI, y = Suicides.100k, color = Country)) 
+    }
+  
+    if(input$variable=="GDP.per.capita"){
+      g = ggplot(df4, aes(x = GDP.per.capita, y = Suicides.100k, color = Country))  
+    }
+  
+    if(input$variable=="Life.Expectancy"){
+      g = ggplot(df4, aes(x = Life.Expectancy, y = Suicides.100k, color = Country)) 
+    }
+  
+  if(input$variable=="Schooling.Expectancy"){
+      g = ggplot(df4, aes(x = Schooling.Expectancy, y = Suicides.100k, color = Country))
+    }
+  if(input$variable=="Mean.Schooling"){
+      g = ggplot(df4, aes(x = Mean.Schooling, y = Suicides.100k, color = Country)) 
+    }
+    
+    g + geom_point(size = 3, alpha = .7)+ theme_minimal() + 
+      theme(axis.title = element_text(size = 10),
+              axis.text = element_text(size = 8,),
+              plot.margin = margin(0,0,0,0, "cm")) +
+      theme(legend.position = "none")
+})
+
+```
+
+
+Conclusion
+=======================================================================
+
+Row {data-height=400}
+-----------------------------------------------------------------------
+
+### 
+
+```{r}
+span(textOutput("text4"), style="color: black;
+                                 font-size: 24px;
+                                 font-style: italic")
+output$text4 = renderText({
+  "Some of the notable correlations could be proven less significant if more than one parameter or less groups were considered. As seen in Oceania’s 0.9+ correlation between the suicide rates per 100k population and the mean years of schooling, if also taken into account another variable using a 3d scatterplot, such as the GDP per capita, it becomes apparent that they might not necessarily mean anything. By taking into consideration this other variable, it's important to note that a tridimensional representation helps visualization by limiting the number of arguments being used for the comparison; however, there are others that might influence the correlation values and their conclusion. "
+})
+
+```
+
+
+Row {.tabset}
+-----------------------------------------------------------------------
+
+### References
+
+***
+
+- BANCO MUNDIAL. World Development Indicators. Disponível em:
+http://databank.worldbank.org/data/source/world-development-indicators. Acesso em: 5 ago. 2020.
+
+- BBC. Existe alguma relação entre crise econômica e aumento nas taxas de
+suicídio?. Disponível em: https://www.bbc.com/portuguese/geral-48890430. Acesso em: 5
+ago. 2020.
+
+- KAGGLE. Suicide Rates Overview 1985 to 2016. Disponível em:
+https://www.kaggle.com/russellyates88/suicide-rates-overview-1985-to-2016. Acesso em: 5
+ago. 2020.
+
+- KAGGLE. Suicide in the Twenty-First Century. Disponível em:
+https://www.kaggle.com/szamil/suicide-in-the-twenty-first-century/notebook. Acesso em: 5
+ago. 2020.
+
+- ONU. Um suicídio ocorre a cada 40 segundos no mundo, diz OMS. Disponível
+em: https://nacoesunidas.org/um-suicidio-ocorre-a-cada-40-segundos-no-mundo-diz-oms/.
+Acesso em: 5 ago. 2020.
+
+- OPHI. TRAINING MATERIAL FOR PRODUCING NATIONAL HUMAN
+DEVELOPMENT REPORTS. Disponível em: http://www.ophi.org.uk/wpcontent/uploads/OPHI-RP-29a.pdf-2011.pdf. Acesso em: 5 ago. 2020.
+
+- OUR WORLD IN DATA. Research and data to make progress against the
+world’s largest problems. Disponível em: https://ourworldindata.org/. Acesso em: 5 ago. 2020.
+
+- PEBMED. Pandemia por Covid-19 e o risco de suicídio. Disponível em:
+https://pebmed.com.br/covid-19-e-o-risco-de-suicidio/. Acesso em: 5 ago. 2020.
+
+- UNITED NATIONS DEVELOPMENT PROGRAMME. Human Development
+Reports. Disponível em: http://hdr.undp.org/en/indicators/137506. Acesso em: 5 ago. 2020.
+
+- WORLD HEALTH ORGANIZATION. Suicide prevention. Disponível em:
+http://www.who.int/mental_health/suicide-prevention/en/. Acesso em: 5 ago. 2020.
+
+
+### Example graph
+ 
+```{r}
+library(imager)
+
+image = load.image("3d.JPG")  
+  
+renderPlot({plot(image)})
+```
+
